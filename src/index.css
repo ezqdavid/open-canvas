@@ -1,0 +1,440 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+:root {
+  /* Premium Dark Theme - HSL Tailored */
+  --bg-space: hsl(240, 10%, 4%);
+  --bg-canvas: hsl(240, 10%, 5%);
+  --bg-panel: hsla(240, 10%, 8%, 0.7);
+  --bg-card: hsla(240, 10%, 12%, 0.85);
+  --bg-hover: hsla(240, 10%, 18%, 0.9);
+  
+  --border-subtle: hsla(240, 8%, 18%, 0.6);
+  --border-glow: hsla(240, 10%, 25%, 0.5);
+  --border-focus: hsla(172, 90%, 45%, 0.4);
+  
+  --text-primary: hsl(0, 0%, 98%);
+  --text-secondary: hsl(240, 5%, 75%);
+  --text-muted: hsl(240, 5%, 52%);
+  
+  /* ADHD-friendly Color Accents */
+  --accent-teal: hsl(172, 90%, 45%);       /* Zen Teal - primary calming and focus color */
+  --accent-teal-glow: hsla(172, 90%, 45%, 0.15);
+  
+  --accent-purple: hsl(265, 85%, 65%);     /* Chaos Purple - exploration and linking */
+  --accent-purple-glow: hsla(265, 85%, 65%, 0.15);
+  
+  --accent-magenta: hsl(325, 90%, 60%);    /* Presence Magenta - active collaborators */
+  --accent-magenta-glow: hsla(325, 90%, 60%, 0.15);
+  
+  --accent-amber: hsl(40, 95%, 55%);       /* Alert Amber - nudges and attention blocks */
+  --accent-amber-glow: hsla(40, 95%, 55%, 0.15);
+
+  --font-display: 'Outfit', sans-serif;
+  --font-sans: 'Inter', sans-serif;
+}
+
+/* Base resets & scrollbars */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  scrollbar-width: thin;
+  scrollbar-color: hsla(240, 10%, 30%, 0.5) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsla(240, 10%, 30%, 0.5);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsla(172, 90%, 45%, 0.5);
+}
+
+body, html, #root {
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--bg-space);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Dotted Canvas Grid Background */
+.canvas-grid-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: radial-gradient(var(--border-glow) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-position: var(--grid-offset-x, 0px) var(--grid-offset-y, 0px);
+  pointer-events: none;
+  z-index: 0;
+  transition: opacity 0.3s ease;
+}
+
+/* Glassmorphism Panels */
+.glass-panel {
+  background: var(--bg-panel);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4),
+              inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.glass-panel:hover {
+  border-color: var(--border-glow);
+}
+
+/* Floating widgets positioning */
+.floating-dock {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  gap: 12px;
+  padding: 10px 16px;
+  align-items: center;
+}
+
+/* Neon glow buttons */
+.btn-premium {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  background: hsla(240, 10%, 15%, 0.6);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-premium:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-teal);
+  color: var(--text-primary);
+  box-shadow: 0 0 12px var(--accent-teal-glow);
+  transform: translateY(-1px);
+}
+
+.btn-premium.active {
+  background: var(--accent-teal-glow);
+  border-color: var(--accent-teal);
+  color: var(--accent-teal);
+  box-shadow: 0 0 16px var(--accent-teal-glow);
+}
+
+.btn-premium-purple:hover {
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 12px var(--accent-purple-glow);
+}
+.btn-premium-purple.active {
+  background: var(--accent-purple-glow);
+  border-color: var(--accent-purple);
+  color: var(--accent-purple);
+  box-shadow: 0 0 16px var(--accent-purple-glow);
+}
+
+.btn-premium-magenta:hover {
+  border-color: var(--accent-magenta);
+  box-shadow: 0 0 12px var(--accent-magenta-glow);
+}
+.btn-premium-magenta.active {
+  background: var(--accent-magenta-glow);
+  border-color: var(--accent-magenta);
+  color: var(--accent-magenta);
+  box-shadow: 0 0 16px var(--accent-magenta-glow);
+}
+
+/* Node Elements Wrapper */
+.canvas-node {
+  position: absolute;
+  min-width: 200px;
+  border-radius: 14px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border-subtle);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  cursor: grab;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: text;
+}
+
+.canvas-node:active {
+  cursor: grabbing;
+}
+
+.canvas-node.selected {
+  border-color: var(--accent-teal);
+  box-shadow: 0 0 20px var(--accent-teal-glow), 0 8px 30px rgba(0,0,0,0.5);
+  transform: scale(1.02);
+}
+
+.canvas-node.node-purple.selected {
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 20px var(--accent-purple-glow);
+}
+.canvas-node.node-magenta.selected {
+  border-color: var(--accent-magenta);
+  box-shadow: 0 0 20px var(--accent-magenta-glow);
+}
+.canvas-node.node-amber.selected {
+  border-color: var(--accent-amber);
+  box-shadow: 0 0 20px var(--accent-amber-glow);
+}
+
+.node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: hsla(240, 10%, 15%, 0.4);
+  border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
+}
+
+.node-title-input {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  width: 75%;
+  outline: none;
+}
+
+.node-content {
+  padding: 12px;
+  flex-grow: 1;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* Zen Focus Mode Backdrops */
+.zen-backdrop-aurora {
+  background: radial-gradient(circle at 10% 20%, hsla(265, 85%, 15%, 0.4) 0%, transparent 40%),
+              radial-gradient(circle at 90% 80%, hsla(172, 90%, 15%, 0.4) 0%, transparent 40%),
+              hsl(240, 10%, 3%);
+}
+
+.zen-backdrop-cosmic {
+  background: radial-gradient(circle at 50% 50%, hsla(325, 90%, 10%, 0.5) 0%, transparent 60%),
+              radial-gradient(circle at 20% 80%, hsla(240, 80%, 12%, 0.4) 0%, transparent 40%),
+              hsl(240, 10%, 3%);
+}
+
+.zen-backdrop-void {
+  background: hsl(240, 10%, 2%);
+}
+
+/* Ambient Pulse (Noise Generator Visualizer) */
+@keyframes slowPulse {
+  0%, 100% { opacity: 0.2; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.08); }
+}
+
+.ambient-pulser {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+  z-index: 1;
+  animation: slowPulse 8s infinite ease-in-out;
+}
+
+/* Connective Links SVG */
+.canvas-svg-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.connection-line {
+  stroke: var(--accent-purple);
+  stroke-width: 2;
+  stroke-dasharray: 4 2;
+  fill: none;
+  opacity: 0.45;
+  transition: stroke 0.3s, stroke-width 0.3s, opacity 0.3s;
+}
+
+.connection-line:hover, .connection-line.highlighted {
+  stroke: var(--accent-teal);
+  stroke-width: 3;
+  stroke-dasharray: 0;
+  opacity: 1;
+  filter: drop-shadow(0 0 4px var(--accent-teal));
+}
+
+/* Markdown node editing text area */
+.node-textarea {
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.5;
+  resize: both;
+}
+
+/* Kanban CSS styles inside canvas node */
+.kanban-board {
+  display: flex;
+  gap: 8px;
+  padding: 4px;
+  min-height: 150px;
+}
+
+.kanban-col {
+  flex: 1;
+  background: hsla(240, 10%, 8%, 0.5);
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 140px;
+}
+
+.kanban-col-title {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.kanban-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: grab;
+  transition: all 0.2s;
+  color: var(--text-secondary);
+}
+
+.kanban-card:hover {
+  border-color: var(--accent-teal);
+  box-shadow: 0 2px 8px var(--accent-teal-glow);
+  transform: translateY(-1px);
+}
+
+/* Header branding */
+.app-branding {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--text-primary) 30%, var(--accent-teal) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Fade animation on mount */
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.97) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.35s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+/* ==========================================
+   MICRO-PLUGINS OVERRIDES
+   ========================================== */
+
+/* 1. Warm Insomnia Late-Night Blue-Light Filter Overlay */
+.warm-insomnia-filter {
+  filter: sepia(0.48) saturate(0.85) contrast(0.95) !important;
+}
+
+/* 2. High-Contrast Minimalist Focus Theme Overrides */
+.minimal-focus-theme {
+  --bg-space: #09090b !important;
+  --bg-canvas: #09090b !important;
+  --bg-panel: #121214 !important;
+  --bg-card: #18181b !important;
+  --border-subtle: #27272a !important;
+  --border-glow: #3f3f46 !important;
+  --accent-teal: #ffffff !important;
+  --accent-teal-glow: rgba(255, 255, 255, 0.05) !important;
+  --accent-purple: #a1a1aa !important;
+  --accent-purple-glow: rgba(255, 255, 255, 0.05) !important;
+  --accent-magenta: #a1a1aa !important;
+  --accent-magenta-glow: rgba(255, 255, 255, 0.05) !important;
+  --accent-amber: #a1a1aa !important;
+  --accent-amber-glow: rgba(255, 255, 255, 0.05) !important;
+}
+
+.minimal-focus-theme .canvas-grid-bg {
+  opacity: 0 !important;
+}
+
+.minimal-focus-theme .canvas-node {
+  background: #18181b !important;
+  border-color: #27272a !important;
+  box-shadow: none !important;
+  border-radius: 6px !important;
+}
+
+.minimal-focus-theme .canvas-node.selected {
+  border-color: #ffffff !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.minimal-focus-theme .connection-line {
+  stroke: #52525b !important;
+  stroke-dasharray: none !important;
+  opacity: 0.8 !important;
+  filter: none !important;
+}
+
+.minimal-focus-theme .node-header {
+  background: transparent !important;
+  border-bottom: 1px solid #27272a !important;
+}
+
+.minimal-focus-theme .floating-dock button {
+  border-radius: 4px !important;
+  box-shadow: none !important;
+  border-color: #27272a !important;
+}
