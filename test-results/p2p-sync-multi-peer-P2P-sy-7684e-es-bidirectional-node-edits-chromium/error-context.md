@@ -78,7 +78,7 @@ Call log:
               - button "Copy" [ref=e65] [cursor=pointer]:
                 - img [ref=e66]
                 - generic [ref=e69]: Copy
-            - generic [ref=e70]: peer_hhluk51rs
+            - generic [ref=e70]: peer_9fno28yyd
           - generic [ref=e71]:
             - generic [ref=e72]:
               - img [ref=e73]

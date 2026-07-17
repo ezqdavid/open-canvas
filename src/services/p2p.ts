@@ -18,8 +18,6 @@ const COLORS = ['#2dd4bf', '#a855f7', '#f43f5e', '#fbbf24', '#3b82f6', '#10b981'
 export class P2PCoordinator {
   public myPeer: Peer;
   private provider: WebrtcProvider | null = null;
-  private ydoc: Y.Doc | null = null;
-  private workspaceId: string = 'default-workspace';
   private peers: Map<string, Peer> = new Map();
   private listeners: Set<(peers: Peer[]) => void> = new Set();
   private awarenessCleanup: (() => void) | null = null;
@@ -40,8 +38,6 @@ export class P2PCoordinator {
   public async initialize(workspaceId: string, ydoc: Y.Doc) {
     this.cleanup();
 
-    this.workspaceId = workspaceId;
-    this.ydoc = ydoc;
     this.peers.clear();
 
     this.provider = new WebrtcProvider(`opencanvas_mesh_${workspaceId}`, ydoc, {
@@ -141,7 +137,6 @@ export class P2PCoordinator {
     this.provider?.awareness.setLocalState(null);
     this.provider?.destroy();
     this.provider = null;
-    this.ydoc = null;
     this.peers.clear();
     this.notifyListeners();
   }
