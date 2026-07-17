@@ -3,9 +3,10 @@ import { expect, test } from '@playwright/test'
 test('multi-peer P2P sync propagates bidirectional node edits', async ({ browser }) => {
   test.slow()
 
-  const context = await browser.newContext()
-  const pageA = await context.newPage()
-  const pageB = await context.newPage()
+  const contextA = await browser.newContext()
+  const contextB = await browser.newContext()
+  const pageA = await contextA.newPage()
+  const pageB = await contextB.newPage()
 
   await Promise.all([
     pageA.goto('http://localhost:5173'),
@@ -34,5 +35,5 @@ test('multi-peer P2P sync propagates bidirectional node edits', async ({ browser
   const syncedBackOnA = pageA.locator('input.node-title-input[value="Edición bidireccional exitosa"]')
   await expect(syncedBackOnA).toHaveCount(1, { timeout: 30000 })
 
-  await context.close()
+  await Promise.all([contextA.close(), contextB.close()])
 })
