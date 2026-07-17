@@ -365,7 +365,7 @@ export const ZenFocusOverlay: React.FC<ZenFocusOverlayProps> = ({
         {/* Left Side: Consolidated Distraction-Free Editor */}
         <div className="lg:col-span-2 flex flex-col h-full bg-slate-950/40 backdrop-blur-2xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
           <NodeComponent
-            node={node}
+            nodeId={node.id}
             ydoc={ydoc}
             isLinking={false}
             isLinkOrigin={false}

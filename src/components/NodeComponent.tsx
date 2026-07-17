@@ -4,7 +4,7 @@ import { type CanvasNode } from './Canvas';
 import * as Y from 'yjs';
 
 interface NodeComponentProps {
-  node: CanvasNode;
+  nodeId: string;
   ydoc: Y.Doc;
   isLinking: boolean;
   isLinkOrigin: boolean;
@@ -37,7 +37,7 @@ const LocalCardTimer: React.FC<{ node: CanvasNode; updateNodeData: (fields: Part
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(660, ctx.currentTime); // high ping
+        osc.frequency.setValueAtTime(660, ctx.currentTime);
         osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.1);
         gain.gain.setValueAtTime(0.3, ctx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
@@ -98,7 +98,7 @@ const LocalCardTimer: React.FC<{ node: CanvasNode; updateNodeData: (fields: Part
 };
 
 export const NodeComponent: React.FC<NodeComponentProps> = ({
-  node,
+  nodeId,
   ydoc,
   isLinking: _isLinking,
   isLinkOrigin,
@@ -106,17 +106,66 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
   onInstantFocus,
   onEnterSubCanvas
 }) => {
+  const [node, setNode] = useState<CanvasNode | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [newCardText, setNewCardText] = useState('');
   const [copied, setCopied] = useState(false);
 
+  // Decoupled deep Yjs data observer
+  useEffect(() => {
+    const yNodes = ydoc.getMap<any>('nodes');
+    const nodeMap = yNodes.get(nodeId);
+
+    const updateLocalNode = () => {
+      const raw = yNodes.get(nodeId);
+      if (raw) {
+        const val = raw instanceof Y.Map ? raw.toJSON() : raw;
+        setNode({ id: nodeId, ...val });
+      } else {
+        setNode(null);
+      }
+    };
+
+    updateLocalNode();
+
+    const handleMapChange = () => {
+      updateLocalNode();
+    };
+
+    if (nodeMap instanceof Y.Map) {
+      nodeMap.observe(handleMapChange);
+    }
+
+    const handleGlobalChange = (event: Y.YMapEvent<any>) => {
+      if (event.keysChanged.has(nodeId)) {
+        updateLocalNode();
+      }
+    };
+    yNodes.observe(handleGlobalChange);
+
+    return () => {
+      if (nodeMap instanceof Y.Map) {
+        nodeMap.unobserve(handleMapChange);
+      }
+      yNodes.unobserve(handleGlobalChange);
+    };
+  }, [ydoc, nodeId]);
+
+  if (!node) return null;
+
   // Save changes directly back into Yjs nodes Map
   const updateNodeData = (fields: Partial<Omit<CanvasNode, 'id'>>) => {
     const yNodes = ydoc.getMap<any>('nodes');
-    const existing = yNodes.get(node.id);
-    if (existing) {
+    const nodeMap = yNodes.get(node.id);
+    if (nodeMap instanceof Y.Map) {
+      ydoc.transact(() => {
+        Object.entries(fields).forEach(([k, v]) => {
+          nodeMap.set(k, v);
+        });
+      });
+    } else if (nodeMap) {
       yNodes.set(node.id, {
-        ...existing,
+        ...nodeMap,
         ...fields
       });
     }
@@ -159,9 +208,10 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
   };
 
   const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault(); // Required to allow dropping!
+    e.preventDefault();
   };
 
+  // Clean CRDT-based Drop logic using nested Yjs Arrays
   const handleDrop = (e: React.DragEvent, targetCol: 'todo' | 'progress' | 'done') => {
     e.preventDefault();
     e.stopPropagation();
@@ -170,14 +220,35 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
     const sourceCol = e.dataTransfer.getData('source-column') as 'todo' | 'progress' | 'done';
 
     if (!cardText || sourceCol === targetCol) return;
-    if (!node.kanbanData) return;
 
-    // Mutate arrays and save back to Yjs to trigger multi-peer updates
+    const yNodes = ydoc.getMap<any>('nodes');
+    const nodeMap = yNodes.get(node.id);
+    if (nodeMap instanceof Y.Map) {
+      const kanbanMap = nodeMap.get('kanbanData');
+      if (kanbanMap instanceof Y.Map) {
+        const sourceArray = kanbanMap.get(sourceCol);
+        const targetArray = kanbanMap.get(targetCol);
+
+        if (sourceArray instanceof Y.Array && targetArray instanceof Y.Array) {
+          ydoc.transact(() => {
+            const items = sourceArray.toArray();
+            const idx = items.indexOf(cardText);
+            if (idx !== -1) {
+              sourceArray.delete(idx, 1);
+            }
+            targetArray.push([cardText]);
+          });
+          return;
+        }
+      }
+    }
+
+    // Fallback for legacy plain objects
+    if (!node.kanbanData) return;
     const updatedTodo = [...(node.kanbanData.todo || [])];
     const updatedProgress = [...(node.kanbanData.progress || [])];
     const updatedDone = [...(node.kanbanData.done || [])];
 
-    // Remove from source column
     if (sourceCol === 'todo') {
       const idx = updatedTodo.indexOf(cardText);
       if (idx !== -1) updatedTodo.splice(idx, 1);
@@ -189,7 +260,6 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
       if (idx !== -1) updatedDone.splice(idx, 1);
     }
 
-    // Add to target column
     if (targetCol === 'todo') updatedTodo.push(cardText);
     else if (targetCol === 'progress') updatedProgress.push(cardText);
     else if (targetCol === 'done') updatedDone.push(cardText);
@@ -203,11 +273,27 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
     });
   };
 
-  // Add card to Kanban board
+  // Clean CRDT-based Card Insertion using Yjs array pushes
   const addKanbanCard = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCardText.trim() || !node.kanbanData) return;
+    if (!newCardText.trim()) return;
 
+    const yNodes = ydoc.getMap<any>('nodes');
+    const nodeMap = yNodes.get(node.id);
+    if (nodeMap instanceof Y.Map) {
+      const kanbanMap = nodeMap.get('kanbanData');
+      if (kanbanMap instanceof Y.Map) {
+        const todoArray = kanbanMap.get('todo');
+        if (todoArray instanceof Y.Array) {
+          todoArray.push([newCardText.trim()]);
+          setNewCardText('');
+          return;
+        }
+      }
+    }
+
+    // Fallback for legacy plain objects
+    if (!node.kanbanData) return;
     const updatedTodo = [...(node.kanbanData.todo || []), newCardText.trim()];
     updateNodeData({
       kanbanData: {
@@ -224,21 +310,19 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
     
     const lines = text.split('\n');
     return lines.map((line, idx) => {
-      // Bullet points
       if (line.startsWith('- ') || line.startsWith('* ')) {
-        return <li key={idx} className="ml-4 list-disc text-slate-300 my-1">{line.substring(2)}</li>;
+        return <li key={idx} className="ml-4 list-disc text-secondary my-1">{line.substring(2)}</li>;
       }
-      // Headings
       if (line.startsWith('### ')) {
-        return <h4 key={idx} className="text-sm font-bold text-white mt-3 mb-1 font-display">{line.substring(4)}</h4>;
+        return <h4 key={idx} className="text-sm font-bold text-primary mt-3 mb-1 font-display">{line.substring(4)}</h4>;
       }
       if (line.startsWith('## ')) {
-        return <h3 key={idx} className="text-base font-bold text-white mt-4 mb-1 font-display">{line.substring(3)}</h3>;
+        return <h3 key={idx} className="text-base font-bold text-primary mt-4 mb-1 font-display">{line.substring(3)}</h3>;
       }
       if (line.startsWith('# ')) {
-        return <h2 key={idx} className="text-lg font-bold text-white mt-4 mb-2 font-display">{line.substring(2)}</h2>;
+        return <h2 key={idx} className="text-lg font-bold text-primary mt-4 mb-2 font-display">{line.substring(2)}</h2>;
       }
-      return <p key={idx} className="my-1.5 text-slate-300 leading-relaxed break-words">{line}</p>;
+      return <p key={idx} className="my-1.5 text-secondary leading-relaxed break-words">{line}</p>;
     });
   };
 
@@ -247,54 +331,49 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
       {/* Node Header */}
       <div className="node-header handle-drag select-none">
         <div className="flex items-center gap-1.5 w-full">
-          {/* Custom Block Icon */}
-          {node.type === 'text' && <FileText className="w-3.5 h-3.5 text-teal-400" />}
-          {node.type === 'kanban' && <CheckSquare className="w-3.5 h-3.5 text-purple-400" />}
-          {node.type === 'media' && <Play className="w-3.5 h-3.5 text-pink-400" />}
-          {node.type === 'nested' && <Layers className="w-3.5 h-3.5 text-indigo-400" />}
-          {node.type === 'code' && <Code className="w-3.5 h-3.5 text-amber-400" />}
-          {node.type === 'widget' && <Timer className="w-3.5 h-3.5 text-indigo-400" />}
+          {node.type === 'text' && <FileText className="w-4 h-4 text-teal-400" />}
+          {node.type === 'kanban' && <CheckSquare className="w-4 h-4 text-purple-400" />}
+          {node.type === 'media' && <Play className="w-4 h-4 text-pink-400" />}
+          {node.type === 'nested' && <Layers className="w-4 h-4 text-indigo-400" />}
+          {node.type === 'code' && <Code className="w-4 h-4 text-amber-400" />}
+          {node.type === 'widget' && <Timer className="w-4 h-4 text-indigo-400" />}
 
-          {/* Editable Node Title */}
           <input
             type="text"
             value={node.title}
             onChange={(e) => updateNodeData({ title: e.target.value })}
             className="node-title-input"
             placeholder="Untitled Jotting"
-            onMouseDown={(e) => e.stopPropagation()} // Let text selection work in header
+            onMouseDown={(e) => e.stopPropagation()}
           />
         </div>
 
-        {/* Action Controls */}
+        {/* Action Controls in MD3 shapes */}
         <div className="flex items-center gap-1">
-          {/* Instant Focus (v0) */}
           <button
             title="Instant Focus"
             onClick={(e) => {
               e.stopPropagation();
               onInstantFocus();
             }}
-            className="p-1 rounded hover:bg-white/10 text-teal-400/80 hover:text-teal-400 transition-all"
+            className="p-1 rounded-full hover:bg-white/10 text-teal-400/80 hover:text-teal-400 transition-all cursor-pointer"
           >
-            <Zap className="w-3.5 h-3.5" />
+            <Zap className="w-4 h-4" />
           </button>
 
-          {/* Link connector trigger */}
           <button
             title="Create Link"
             onClick={(e) => {
               e.stopPropagation();
               onHeaderAction('link');
             }}
-            className={`p-1 rounded hover:bg-white/10 text-slate-400 hover:text-purple-400 transition-colors ${
+            className={`p-1 rounded-full hover:bg-white/10 text-secondary hover:text-purple-400 transition-colors cursor-pointer ${
               isLinkOrigin ? 'bg-purple-500/20 text-purple-400 border border-purple-500/40' : ''
             }`}
           >
-            <Link2 className="w-3.5 h-3.5" />
+            <Link2 className="w-4 h-4" />
           </button>
 
-          {/* Delete node button */}
           <button
             title="Delete block"
             onClick={(e) => {
@@ -303,9 +382,9 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                 onHeaderAction('delete');
               }
             }}
-            className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition-colors"
+            className="p-1 rounded-full hover:bg-rose-500/20 text-secondary hover:text-rose-400 transition-colors cursor-pointer"
           >
-            <Trash2 className="w-3.5 h-3.5" />
+            <Trash2 className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -313,7 +392,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
       {/* Node Content area */}
       <div
         className="node-content flex flex-col h-full overflow-y-auto"
-        onMouseDown={(e) => e.stopPropagation()} // Prevent panning while interacting with content
+        onMouseDown={(e) => e.stopPropagation()}
         onDoubleClick={(e) => {
           e.stopPropagation();
           if (node.type === 'text' || node.type === 'code') setIsEditing(true);
@@ -342,7 +421,6 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
         {/* CODE SNIPPET NODE TYPE */}
         {node.type === 'code' && (
           <div className="flex-grow w-full h-full min-h-[120px] relative group/code font-mono">
-            {/* Copy Code Button (only when not editing) */}
             {!isEditing && node.content && (
               <button
                 title="Copy Code"
@@ -352,7 +430,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                   setCopied(true);
                   setTimeout(() => setCopied(false), 2000);
                 }}
-                className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 border border-white/10 text-slate-400 hover:text-amber-400 hover:border-amber-400/30 transition-all z-10 cursor-pointer"
+                className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 border border-white/10 text-secondary hover:text-amber-400 hover:border-amber-400/30 transition-all z-10 cursor-pointer"
               >
                 {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
@@ -384,7 +462,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, 'todo')}
               >
-                <div className="kanban-col-title text-teal-400">To Do</div>
+                <div className="kanban-col-title text-teal-400">To do</div>
                 {(node.kanbanData.todo || []).map((card, idx) => (
                   <div
                     key={idx}
@@ -443,7 +521,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                 value={newCardText}
                 onChange={(e) => setNewCardText(e.target.value)}
                 placeholder="Add card to To Do..."
-                className="flex-grow px-2.5 py-1.5 rounded-lg bg-black/40 border border-white/10 outline-none text-xs text-white placeholder-slate-500 focus:border-purple-500/50 transition-all"
+                className="flex-grow px-2.5 py-1.5 rounded-lg bg-black/40 border border-white/10 outline-none text-xs text-primary placeholder-muted focus:border-purple-500/50 transition-all"
               />
               <button
                 type="submit"
@@ -459,8 +537,8 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
         {node.type === 'nested' && (
           <div className="flex flex-col items-center justify-center p-4 text-center h-full gap-2">
             <Layers className="w-12 h-12 text-indigo-400 opacity-60 animate-bounce" style={{ animationDuration: '4s' }} />
-            <div className="text-sm font-semibold text-white font-display">Sub-canvas Map Portal</div>
-            <p className="text-xs text-slate-400 leading-relaxed max-w-[200px]">
+            <div className="text-sm font-semibold text-primary font-display">Sub-canvas map portal</div>
+            <p className="text-xs text-secondary leading-relaxed max-w-[200px]">
               Contains hierarchical nested nodes. Double-click inside to open sub-dimension map folder.
             </p>
             <button
@@ -478,7 +556,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
         {node.type === 'widget' && node.widgetData && (
           <div className="flex flex-col h-full gap-2.5">
             {/* Widget Tab Selector */}
-            <div className="flex bg-black/30 border border-white/5 rounded-lg p-0.5 text-[9px] uppercase font-bold tracking-wider">
+            <div className="flex bg-black/30 border border-white/5 rounded-lg p-0.5 text-[10px] uppercase font-bold tracking-wider">
               {(['checklist', 'poll', 'timer'] as const).map((tab) => (
                 <button
                   key={tab}
@@ -491,7 +569,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                   className={`flex-1 py-1 rounded text-center cursor-pointer transition-all ${
                     node.widgetData!.type === tab 
                       ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-extrabold font-display' 
-                      : 'text-slate-400 hover:text-white'
+                      : 'text-secondary hover:text-primary'
                   }`}
                 >
                   {tab}
@@ -508,7 +586,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                     {(node.widgetData.checklist || []).map((item, idx) => (
                       <label 
                         key={idx} 
-                        className="flex items-start gap-2 text-xs text-slate-300 hover:text-white cursor-pointer select-none"
+                        className="flex items-start gap-2 text-xs text-secondary hover:text-primary cursor-pointer select-none"
                       >
                         <input
                           type="checkbox"
@@ -518,14 +596,14 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                             updated[idx] = { ...updated[idx], checked: e.target.checked };
                             updateNodeData({
                               widgetData: {
-                                ...node.widgetData!,
+                               ...node.widgetData!,
                                 checklist: updated
                               }
                             });
                           }}
                           className="mt-0.5 rounded accent-indigo-500 cursor-pointer"
                         />
-                        <span className={item.checked ? 'line-through text-slate-500' : ''}>
+                        <span className={item.checked ? 'line-through text-muted' : ''}>
                           {item.text}
                         </span>
                       </label>
@@ -552,7 +630,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                       name="chkInput"
                       type="text"
                       placeholder="New task item..."
-                      className="flex-grow px-2 py-1 rounded bg-black/40 border border-white/5 outline-none text-[11px] text-white placeholder-slate-500 focus:border-indigo-500/50"
+                      className="flex-grow px-2 py-1 rounded bg-black/40 border border-white/5 outline-none text-[11px] text-primary placeholder-muted focus:border-indigo-500/50"
                     />
                     <button type="submit" className="p-1 rounded bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/30 text-indigo-300 cursor-pointer">
                       <Plus className="w-3.5 h-3.5" />
@@ -587,10 +665,10 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                             className="absolute left-0 top-0 bottom-0 bg-indigo-500/15 transition-all duration-500"
                             style={{ width: `${percentage}%` }}
                           />
-                          <span className="text-[11px] text-slate-200 z-10 font-medium group-hover:text-indigo-300 transition-colors pl-1">
+                          <span className="text-[11px] text-secondary z-10 font-medium group-hover:text-indigo-300 transition-colors pl-1">
                             {opt.option}
                           </span>
-                          <span className="text-[10px] text-slate-400 font-mono font-bold z-10 pr-1">
+                          <span className="text-[10px] text-muted font-mono font-bold z-10 pr-1">
                             {opt.votes} ({percentage}%)
                           </span>
                         </div>
@@ -618,7 +696,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                       name="pollInput"
                       type="text"
                       placeholder="New poll option..."
-                      className="flex-grow px-2 py-1 rounded bg-black/40 border border-white/5 outline-none text-[11px] text-white placeholder-slate-500 focus:border-indigo-500/50"
+                      className="flex-grow px-2 py-1 rounded bg-black/40 border border-white/5 outline-none text-[11px] text-primary placeholder-muted focus:border-indigo-500/50"
                     />
                     <button type="submit" className="p-1 rounded bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/30 text-indigo-300 cursor-pointer">
                       <Plus className="w-3.5 h-3.5" />
@@ -662,7 +740,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
             ) : (
               <div className="flex flex-col items-center justify-center p-3 text-center gap-2">
                 <Image className="w-8 h-8 text-pink-400 opacity-50" />
-                <div className="text-[11px] text-slate-400">Embed local video/image URL below:</div>
+                <div className="text-[11px] text-muted">Embed local video/image URL below:</div>
                 <input
                   type="text"
                   placeholder="https://images.unsplash.com/photo-... or video.mp4"
@@ -671,7 +749,7 @@ export const NodeComponent: React.FC<NodeComponentProps> = ({
                       updateNodeData({ content: (e.target as HTMLInputElement).value });
                     }
                   }}
-                  className="w-full px-2 py-1 bg-black/40 border border-white/10 rounded text-[11px] text-slate-300 outline-none focus:border-pink-500/50"
+                  className="w-full px-2 py-1 bg-black/40 border border-white/10 rounded text-[11px] text-secondary outline-none focus:border-pink-500/50"
                 />
               </div>
             )}

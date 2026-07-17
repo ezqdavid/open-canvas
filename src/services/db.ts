@@ -34,7 +34,7 @@ const yjsUpdateSchema = {
   primaryKey: 'id',
   type: 'object',
   properties: {
-    id: { type: 'string', maxLength: 150 }, // workspaceId_timestamp_counter
+    id: { type: 'string', maxLength: 150 }, // strict UUID string
     workspaceId: { type: 'string', maxLength: 100 },
     updateHex: { type: 'string' },
     timestamp: { type: 'number' }
@@ -105,9 +105,6 @@ export async function loadWorkspaceYdoc(workspaceId: string, ydoc: Y.Doc): Promi
     });
   }, 'local-load');
 
-  // Counter to ensure unique IDs for updates created in the same millisecond
-  let changeCounter = 0;
-
   // 3. Bind subsequent local updates to save into RxDB
   const handleUpdate = async (update: Uint8Array, origin: any) => {
     // If update originated from database initial loading or peer synchronization, don't re-save it
@@ -115,7 +112,7 @@ export async function loadWorkspaceYdoc(workspaceId: string, ydoc: Y.Doc): Promi
 
     const hex = uint8ArrayToHex(update);
     const timestamp = Date.now();
-    const id = `${workspaceId}_${timestamp}_${changeCounter++}`;
+    const id = crypto.randomUUID(); // high entropy ID to prevent collision during rapid concurrent offline writes
 
     try {
       await db.yjs_updates.insert({
@@ -157,9 +154,9 @@ export async function compactWorkspace(workspaceId: string, ydoc: Y.Doc) {
     selector: { workspaceId }
   }).exec();
 
-  // Insert the single consolidated update
+  // Insert the single consolidated update with standard collision-free ID
   await db.yjs_updates.insert({
-    id: `${workspaceId}_${timestamp}_compact`,
+    id: crypto.randomUUID(),
     workspaceId,
     updateHex: hex,
     timestamp

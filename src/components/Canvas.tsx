@@ -14,6 +14,19 @@ interface CanvasProps {
   onInstantFocus: (nodeId: string) => void;
 }
 
+export interface SimplifiedNode {
+  id: string;
+  title: string;
+  type: 'text' | 'shape' | 'kanban' | 'media' | 'nested' | 'code' | 'widget';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color?: string;
+  parentId?: string;
+}
+
+// Full CanvasNode for compatibility with other parts of the app
 export interface CanvasNode {
   id: string;
   title: string;
@@ -57,7 +70,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onInstantFocus
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [nodes, setNodes] = useState<CanvasNode[]>([]);
+  const [nodes, setNodes] = useState<SimplifiedNode[]>([]);
   const [links, setLinks] = useState<CanvasLink[]>([]);
   const [peers, setPeers] = useState<Peer[]>([]);
   
@@ -99,21 +112,62 @@ export const Canvas: React.FC<CanvasProps> = ({
     };
   };
 
-  // Sync Yjs maps to local React state
+  // Sync Yjs maps to local React state - optimized to only update state on structural changes
   useEffect(() => {
     const yNodes = ydoc.getMap<any>('nodes');
     const yLinks = ydoc.getArray<any>('links');
 
     const updateState = () => {
-      // Load nodes
-      const currentNodes: CanvasNode[] = [];
+      // Load structural nodes only (SimplifiedNode)
+      const currentNodes: SimplifiedNode[] = [];
       yNodes.forEach((val, key) => {
-        currentNodes.push({ id: key, ...val });
+        const raw = val instanceof Y.Map ? val.toJSON() : val;
+        currentNodes.push({
+          id: key,
+          title: raw.title || 'Untitled Jotting',
+          type: raw.type || 'text',
+          x: raw.x ?? 0,
+          y: raw.y ?? 0,
+          width: raw.width ?? 240,
+          height: raw.height ?? 150,
+          color: raw.color || 'teal',
+          parentId: raw.parentId
+        });
       });
-      setNodes(currentNodes);
 
-      // Load links
-      setLinks(yLinks.toArray());
+      // Sort by ID to ensure consistency in ordering for reference-equality checks
+      currentNodes.sort((a, b) => a.id.localeCompare(b.id));
+
+      // Reference-equality checks: prevents state changes when non-structural values (like text contents) update
+      setNodes(prevNodes => {
+        const isSame = prevNodes.length === currentNodes.length && prevNodes.every((n, i) => {
+          const c = currentNodes[i];
+          return n && c &&
+                 n.id === c.id &&
+                 n.title === c.title &&
+                 n.type === c.type &&
+                 n.x === c.x &&
+                 n.y === c.y &&
+                 n.width === c.width &&
+                 n.height === c.height &&
+                 n.color === c.color &&
+                 n.parentId === c.parentId;
+        });
+        return isSame ? prevNodes : currentNodes;
+      });
+
+      // Reference-equality checks on Links
+      setLinks(prevLinks => {
+        const currentLinks = yLinks.toArray();
+        const isSame = prevLinks.length === currentLinks.length && prevLinks.every((l, i) => {
+          const c = currentLinks[i];
+          return l && c &&
+                 l.id === c.id &&
+                 l.from === c.from &&
+                 l.to === c.to;
+        });
+        return isSame ? prevLinks : currentLinks;
+      });
     };
 
     yNodes.observe(updateState);
@@ -147,11 +201,10 @@ export const Canvas: React.FC<CanvasProps> = ({
     const virtual = getVirtualCoords(e.clientX, e.clientY);
     setMouseVirtualPos(virtual);
 
-    // Track active cursor position with peers
     p2pCoordinator.updateCursor(virtual.x, virtual.y);
 
     if (isPanning) {
-      setIsFocusing(false); // disable smooth transitions during active manual panning
+      setIsFocusing(false);
       setPan((prev) => ({
         x: prev.x + e.movementX,
         y: prev.y + e.movementY
@@ -159,7 +212,12 @@ export const Canvas: React.FC<CanvasProps> = ({
     } else if (draggedNodeId) {
       const yNodes = ydoc.getMap<any>('nodes');
       const nodeData = yNodes.get(draggedNodeId);
-      if (nodeData) {
+      if (nodeData instanceof Y.Map) {
+        ydoc.transact(() => {
+          nodeData.set('x', virtual.x - dragStartOffset.current.x);
+          nodeData.set('y', virtual.y - dragStartOffset.current.y);
+        });
+      } else if (nodeData) {
         yNodes.set(draggedNodeId, {
           ...nodeData,
           x: virtual.x - dragStartOffset.current.x,
@@ -169,13 +227,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
   };
 
-  // Handle Mouse Up
   const handleMouseUp = () => {
     setIsPanning(false);
     setDraggedNodeId(null);
   };
 
-  // Zooming around Mouse cursor location
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     if (!containerRef.current) return;
@@ -185,7 +241,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // Convert mouse position to virtual coordinate before zoom scale change
     const wheelVirtualX = (mouseX - pan.x) / zoom;
     const wheelVirtualY = (mouseY - pan.y) / zoom;
 
@@ -200,7 +255,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     });
   };
 
-  // Double click to add a new Node
   const handleDoubleClick = (e: React.MouseEvent) => {
     if (e.target !== containerRef.current && !(e.target as HTMLElement).classList.contains('canvas-grid-bg')) return;
     
@@ -208,31 +262,36 @@ export const Canvas: React.FC<CanvasProps> = ({
     spawnNode('text', virtual.x - 120, virtual.y - 75);
   };
 
-  // Spawn dynamic Node in Yjs mapping
+  // Natively nested CRDT style spawning utilizing Y.Map / Y.Array instances
   const spawnNode = (type: CanvasNode['type'], x: number, y: number) => {
     const id = 'node_' + Math.random().toString(36).substring(2, 11);
     const yNodes = ydoc.getMap<any>('nodes');
     
-    const newNode: Omit<CanvasNode, 'id'> = {
-      title: type === 'text' ? 'New Jotting' : type === 'kanban' ? 'Project Flow' : type === 'code' ? 'Code Snippet' : type === 'widget' ? 'Task Widget' : 'Visual Anchor',
-      type,
-      x,
-      y,
-      width: type === 'kanban' ? 450 : type === 'nested' ? 320 : type === 'code' ? 360 : type === 'widget' ? 260 : 240,
-      height: type === 'kanban' ? 280 : type === 'nested' ? 220 : type === 'code' ? 240 : type === 'widget' ? 220 : 150,
-      content: type === 'text' ? 'Double-click to write your thoughts here. Map out connections!' : type === 'code' ? '// Write your custom code here\nconsole.log("Hello, Open Canvas!");' : '',
-      color: type === 'text' ? 'teal' : type === 'kanban' ? 'purple' : type === 'code' ? 'amber' : type === 'widget' ? 'indigo' : 'magenta',
-      parentId: activeParentId
-    };
+    const nodeMap = new Y.Map();
+    nodeMap.set('title', type === 'text' ? 'New Jotting' : type === 'kanban' ? 'Project Flow' : type === 'code' ? 'Code Snippet' : type === 'widget' ? 'Task Widget' : 'Visual Anchor');
+    nodeMap.set('type', type);
+    nodeMap.set('x', x);
+    nodeMap.set('y', y);
+    nodeMap.set('width', type === 'kanban' ? 450 : type === 'nested' ? 320 : type === 'code' ? 360 : type === 'widget' ? 260 : 240);
+    nodeMap.set('height', type === 'kanban' ? 280 : type === 'nested' ? 220 : type === 'code' ? 240 : type === 'widget' ? 220 : 150);
+    nodeMap.set('content', type === 'text' ? 'Double-click to write your thoughts here. Map out connections!' : type === 'code' ? '// Write your custom code here\nconsole.log("Hello, Open Canvas!");' : '');
+    nodeMap.set('color', type === 'text' ? 'teal' : type === 'kanban' ? 'purple' : type === 'code' ? 'amber' : type === 'widget' ? 'indigo' : 'magenta');
+    nodeMap.set('parentId', activeParentId);
 
     if (type === 'kanban') {
-      newNode.kanbanData = {
-        todo: ['Review requirements', 'Brainstorm layout'],
-        progress: ['Wireframe UI'],
-        done: []
-      };
+      const kanbanMap = new Y.Map();
+      const todoArray = new Y.Array();
+      todoArray.push(['Review requirements', 'Brainstorm layout']);
+      const progressArray = new Y.Array();
+      progressArray.push(['Wireframe UI']);
+      const doneArray = new Y.Array();
+      
+      kanbanMap.set('todo', todoArray);
+      kanbanMap.set('progress', progressArray);
+      kanbanMap.set('done', doneArray);
+      nodeMap.set('kanbanData', kanbanMap);
     } else if (type === 'widget') {
-      newNode.widgetData = {
+      nodeMap.set('widgetData', {
         type: 'checklist',
         checklist: [
           { text: 'Create draft notes', checked: false },
@@ -244,21 +303,35 @@ export const Canvas: React.FC<CanvasProps> = ({
         ],
         timerLeft: 1500,
         timerActive: false
-      };
+      });
     }
 
-    yNodes.set(id, newNode);
+    yNodes.set(id, nodeMap);
     setActiveNodeId(id);
   };
 
-  // Triggers node dragging
   const handleNodeDragStart = (id: string, e: React.MouseEvent) => {
-    if (linkingFromNodeId) return; // Prevent drag if we are in linking mode
+    if (linkingFromNodeId) return;
+
+    const target = e.target as HTMLElement;
+    // Don't drag if clicking buttons, inputs, textareas, or content area
+    if (
+      target.closest('button') ||
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.closest('.node-content')
+    ) {
+      return;
+    }
 
     const node = nodes.find(n => n.id === id);
     if (!node) return;
 
     setIsFocusing(false);
+
+    // Prevent default selection or ghostly browser drag behaviors
+    e.preventDefault();
+
     const virtual = getVirtualCoords(e.clientX, e.clientY);
     dragStartOffset.current = {
       x: virtual.x - node.x,
@@ -269,7 +342,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     p2pCoordinator.updateActiveNode(id);
   };
 
-  // Triggers instant focus animation centering the selected node
   const triggerInstantFocus = (nodeId: string) => {
     const node = nodes.find(n => n.id === nodeId);
     if (!node || !containerRef.current) return;
@@ -278,7 +350,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     const height = containerRef.current.clientHeight;
 
     setIsFocusing(true);
-    setZoom(1.0); // Reset zoom level back to standard scale for comfortable reading
+    setZoom(1.0);
     setPan({
       x: width / 2 - (node.x + node.width / 2),
       y: height / 2 - (node.y + node.height / 2)
@@ -289,22 +361,18 @@ export const Canvas: React.FC<CanvasProps> = ({
     onInstantFocus(nodeId);
   };
 
-  // Establish connection logic
   const handleNodeHeaderAction = (id: string, action: 'link' | 'delete') => {
     if (action === 'delete') {
       const yNodes = ydoc.getMap<any>('nodes');
       const yLinks = ydoc.getArray<any>('links');
       
-      // Delete links connected to this node
       const currentLinks = yLinks.toArray();
       const indicesToDelete = currentLinks
         .map((link, idx) => (link.from === id || link.to === id ? idx : -1))
         .filter(idx => idx !== -1)
-        .sort((a, b) => b - a); // sort desc to avoid index shifts on deletion
+        .sort((a, b) => b - a);
       
       indicesToDelete.forEach(idx => yLinks.delete(idx));
-      
-      // Delete node
       yNodes.delete(id);
       if (activeNodeId === id) setActiveNodeId(null);
     } else if (action === 'link') {
@@ -312,13 +380,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
   };
 
-  // Link target node selected
   const handleNodeSelectForLink = (targetId: string) => {
     if (!linkingFromNodeId || linkingFromNodeId === targetId) return;
 
     const yLinks = ydoc.getArray<any>('links');
     
-    // Check if link already exists
     const linkExists = yLinks.toArray().some(l => 
       (l.from === linkingFromNodeId && l.to === targetId) || 
       (l.from === targetId && l.to === linkingFromNodeId)
@@ -335,12 +401,10 @@ export const Canvas: React.FC<CanvasProps> = ({
     setLinkingFromNodeId(null);
   };
 
-  // Cancel any active linking
   const cancelLinking = () => {
     setLinkingFromNodeId(null);
   };
 
-  // Delete an existing connection link
   const deleteLink = (linkId: string) => {
     const yLinks = ydoc.getArray<any>('links');
     const current = yLinks.toArray();
@@ -361,16 +425,16 @@ export const Canvas: React.FC<CanvasProps> = ({
       onMouseLeave={handleMouseUp}
       onWheel={handleWheel}
       onDoubleClick={handleDoubleClick}
-      onContextMenu={(e) => e.preventDefault()} // prevent right-click browser menu
+      onContextMenu={(e) => e.preventDefault()}
     >
       {/* Breadcrumbs Navigation Bar */}
-      <div className="absolute top-6 left-6 glass-panel px-4 py-2.5 flex items-center gap-2 z-30 shadow-2xl font-display border border-white/10 select-none">
+      <div className="absolute top-6 left-6 glass-panel px-4 py-2.5 flex items-center gap-2 z-30 shadow-elevation-2 font-display select-none">
         {canvasPath.map((id, index) => {
           const isLast = index === canvasPath.length - 1;
           const title = index === 0 ? '🌌 Core Space' : nodes.find(n => n.id === id)?.title || 'Sub-Space';
           return (
             <React.Fragment key={id}>
-              {index > 0 && <span className="text-slate-500 text-xs font-semibold mx-1">→</span>}
+              {index > 0 && <span className="text-secondary text-xs font-semibold mx-1">→</span>}
               <button
                 onClick={() => {
                   if (!isLast) {
@@ -379,7 +443,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                   }
                 }}
                 className={`text-xs font-bold transition-all uppercase tracking-widest ${
-                  isLast ? 'text-teal-400 font-extrabold' : 'text-slate-400 hover:text-white hover:underline cursor-pointer'
+                  isLast ? 'text-teal-400 font-extrabold font-display' : 'text-secondary hover:text-primary hover:underline cursor-pointer'
                 }`}
               >
                 {title}
@@ -435,7 +499,6 @@ export const Canvas: React.FC<CanvasProps> = ({
             const x2 = toNode.x + toNode.width / 2;
             const y2 = toNode.y + toNode.height / 2;
 
-            // Curved Bezier calculation
             const dx = x2 - x1;
             const cx1 = x1 + dx * 0.4;
             const cy1 = y1;
@@ -445,7 +508,6 @@ export const Canvas: React.FC<CanvasProps> = ({
 
             return (
                <g key={link.id} className="group pointer-events-auto">
-                {/* Invisible wider stroke path for easier hover selection */}
                 <path
                   d={d}
                   fill="none"
@@ -459,7 +521,6 @@ export const Canvas: React.FC<CanvasProps> = ({
                     }
                   }}
                 />
-                {/* Visual rendering path */}
                 <path
                   d={d}
                   className="connection-line"
@@ -518,7 +579,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             }}
           >
             <NodeComponent
-              node={node}
+              nodeId={node.id}
               ydoc={ydoc}
               isLinking={!!linkingFromNodeId}
               isLinkOrigin={linkingFromNodeId === node.id}
@@ -546,7 +607,6 @@ export const Canvas: React.FC<CanvasProps> = ({
                 transform: 'translate(-2px, -2px)'
               }}
             >
-              {/* Custom SVG mouse cursor colored specifically for this peer */}
               <svg
                 width="16"
                 height="16"
@@ -559,9 +619,8 @@ export const Canvas: React.FC<CanvasProps> = ({
                 <path d="M4.5 3V17L9.5 12.5L15 21L18 19.5L12.5 11L18.5 11.5L4.5 3Z" />
               </svg>
 
-              {/* Float badge showcasing username */}
               <div
-                className="px-2 py-0.5 rounded text-[10px] font-medium font-display text-white mt-1 border border-white/20 shadow-lg"
+                className="px-2 py-0.5 rounded text-[10px] font-medium font-display text-white mt-1 border border-white/20 shadow-elevation-2"
                 style={{ backgroundColor: peer.color }}
               >
                 {peer.name}
@@ -573,7 +632,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       {/* Floating Link-Active Notification Banner */}
       {linkingFromNodeId && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 glass-panel px-4 py-2 flex items-center gap-3 z-30 shadow-2xl border-teal-500/30 animate-pulse fade-in">
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 glass-panel px-4 py-2 flex items-center gap-3 z-30 shadow-elevation-4 border-teal-500/30 animate-pulse fade-in">
           <Sparkles className="w-4 h-4 text-teal-400" />
           <span className="text-xs text-teal-200 font-display">Select another node to link, or click anywhere to cancel</span>
           <button
@@ -590,7 +649,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       {/* Floating Canvas Quick Spawner Dock */}
       <div className="floating-dock glass-panel bottom-6 left-1/2 -translate-x-1/2">
-        <span className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground mr-1">Spawn:</span>
+        <span className="text-[10px] uppercase font-bold tracking-widest text-muted mr-1">Spawn:</span>
         <button
           onClick={() => {
             if (containerRef.current) {
@@ -674,11 +733,11 @@ export const Canvas: React.FC<CanvasProps> = ({
               });
             }
           }}
-          className="p-2 rounded-lg hover:bg-white/10 text-slate-300 transition-colors"
+          className="p-2 rounded-lg hover:bg-white/10 text-secondary transition-colors"
         >
           <Maximize className="w-4 h-4" />
         </button>
-        <div className="text-[10px] font-bold text-center text-slate-500 font-display border-t border-white/5 pt-1.5 mt-0.5">
+        <div className="text-[10px] font-bold text-center text-muted font-display border-t border-white/5 pt-1.5 mt-0.5">
           {Math.round(zoom * 100)}%
         </div>
       </div>
