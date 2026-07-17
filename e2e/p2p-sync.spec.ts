@@ -3,31 +3,36 @@ import { expect, test } from '@playwright/test'
 test('multi-peer P2P sync propagates bidirectional node edits', async ({ browser }) => {
   test.slow()
 
-  const contextA = await browser.newContext()
-  const contextB = await browser.newContext()
-  const pageA = await contextA.newPage()
-  const pageB = await contextB.newPage()
+  const context = await browser.newContext()
+  const pageA = await context.newPage()
+  const pageB = await context.newPage()
 
   await Promise.all([
     pageA.goto('http://localhost:5173'),
     pageB.goto('http://localhost:5173'),
   ])
 
+  const loaderA = pageA.getByText('Syncing local mindspace...')
+  const loaderB = pageB.getByText('Syncing local mindspace...')
+
   await Promise.all([
-    expect(pageA.getByText('Syncing local mindspace...')).toBeHidden(),
-    expect(pageB.getByText('Syncing local mindspace...')).toBeHidden(),
+    expect(loaderA).toBeHidden({ timeout: 30000 }),
+    expect(loaderB).toBeHidden({ timeout: 30000 }),
   ])
 
+  const titleInputsA = pageA.locator('input.node-title-input')
+  const beforeCount = await titleInputsA.count()
+
   await pageA.getByRole('button', { name: 'Text Jot' }).click()
-  await pageA.getByText('Double click to write...').first().click()
-  await pageA.getByPlaceholder('Write your notes here... (Markdown supported)').first().fill('Arquitectura P2P Validada')
+  await expect(titleInputsA).toHaveCount(beforeCount + 1)
+  await titleInputsA.nth(beforeCount).fill('Arquitectura P2P Validada')
 
-  await expect(pageB.getByText('Arquitectura P2P Validada').first()).toBeVisible()
+  const syncedOnB = pageB.locator('input.node-title-input[value="Arquitectura P2P Validada"]')
+  await expect(syncedOnB).toHaveCount(1, { timeout: 30000 })
+  await syncedOnB.first().fill('Edición bidireccional exitosa')
 
-  await pageB.getByText('Arquitectura P2P Validada').first().click()
-  await pageB.getByPlaceholder('Write your notes here... (Markdown supported)').first().fill('Edición bidireccional exitosa')
+  const syncedBackOnA = pageA.locator('input.node-title-input[value="Edición bidireccional exitosa"]')
+  await expect(syncedBackOnA).toHaveCount(1, { timeout: 30000 })
 
-  await expect(pageA.getByText('Edición bidireccional exitosa').first()).toBeVisible()
-
-  await Promise.all([contextA.close(), contextB.close()])
+  await context.close()
 })

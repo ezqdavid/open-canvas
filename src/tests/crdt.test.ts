@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 
 describe('Yjs CRDT Convergence Engine', () => {
